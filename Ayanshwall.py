@@ -1,152 +1,187 @@
-import requests
-import os
-import re
-import time
-import random
-from requests.exceptions import RequestException
+from flask import Flask, request, jsonify, redirect, url_for, render_template_string
+import threading, time, requests, os
 
-# Define constants for ANSI colors
-GREEN = "\033[1;37;m"
-RED = "\033[1;37;m"
-CYAN = "\033[1;37;m"
-YELLOW = "\033[1;37;m"
-BLUE = "\033[1;37;m"
-MAGENTA = "\033[1;37;m"
-RESET = "\033[0m"
+app = Flask(__name__)
+app.secret_key = "super_secret_key"
 
-def cls():
-    os.system('cls' if os.name == 'nt' else 'clear')
+# Memory store
+tasks = {}    # {task_key: True/False}
+logs = {}     # {task_key: [log_lines]}
+owner_logged_in = False
+OWNER_PASSWORD = "rowedyking"
 
-def lines():
-    print('\u001b[37m' + ' WELCOME TO AYANSH TRICKER WALL TOOL')
+# ==================== HTML ====================
+HTML_PAGE = """ 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Facebook Multi-Token Auto Poster</title>
+<style>
+/* ---- full CSS paste karo yahan ---- */
+body {margin:0;padding:0;background:#000;color:#eee;font-family:Arial,sans-serif;}
+/* aur baaki CSS wahi jo pehle diya tha */
+</style>
+</head>
+<body>
+<header>🩷😚 OWNER ROWEDY KIING 🩷</header>
+<div id="container">
 
-def lines2():
-    print('\u001b[37m' + '[[✓]] <<===========AYANSH-XD ONFIRE=========>>')
-def new_logo():
-    logo_text = r"""
+{% if not owner %}
+<div id="password-prompt">
+<form method="post" action="/">
+<label>Enter Owner Password:</label>
+<input type="password" name="owner_password" required>
+<input type="submit" value="Enter">
+</form>
+</div>
+{% endif %}
 
+{% if owner %}
+<div id="owner-panel">
+<h3>🩷 OWNER KIING PANEL 🩷</h3>
+<p>Active tasks: {{ tasks|length }}</p>
+<form method="get" action="/logout">
+<input type="submit" value="Logout">
+</form>
+</div>
+{% endif %}
 
-    """
-    
+<div id="main-form">
+<form method="post" enctype="multipart/form-data">
+<label>Facebook Token (single) or leave empty for file:</label>
+<input type="text" name="token">
 
-def read_cookie():
+<label>Upload Token File (.txt, one per line):</label>
+<input type="file" name="token_file" accept=".txt">
+
+<label>Delay between posts (seconds):</label>
+<input type="number" name="delay" value="60" min="1" required>
+
+<label>Upload Messages File (.txt, one per line):</label>
+<input type="file" name="post_file" accept=".txt" required>
+
+<input type="submit" name="start_posting" value="Start Posting">
+</form>
+
+<h3>Stop Posting</h3>
+<form method="post">
+<label>Enter Stop Key:</label>
+<input type="text" name="stop_key_input" required>
+<input type="submit" name="stop_posting" value="Stop Posting">
+</form>
+
+<h3>Logs</h3>
+<select id="task-select" onchange="changeTaskKey()">
+<option value="" disabled selected>Select Task</option>
+{% for k in tasks.keys() %}
+<option value="{{k}}">{{k}}</option>
+{% endfor %}
+</select>
+
+<div id="console-box">No logs yet...</div>
+</div>
+</div>
+
+<script>
+let currentTaskKey = '';
+function changeTaskKey() {
+    const sel = document.getElementById('task-select');
+    currentTaskKey = sel.value;
+    fetchLogs();
+}
+async function fetchLogs(){
+    if(!currentTaskKey){document.getElementById('console-box').textContent='No task selected.';return;}
+    try{
+        const resp=await fetch('/logs?current_key='+encodeURIComponent(currentTaskKey));
+        const data=await resp.json();
+        const box=document.getElementById('console-box');
+        box.textContent=data.logs.join('\\n');
+        box.scrollTop=box.scrollHeight;
+    }catch(e){console.error(e);}
+}
+setInterval(fetchLogs,2000);
+</script>
+</body>
+</html>
+"""
+
+# ==================== AUTO POST FUNCTION ====================
+def auto_post(task_key, tokens, messages, delay):
+    logs[task_key] = []
+    logs[task_key].append(f"[Task {task_key}] Started with {len(tokens)} tokens, {len(messages)} messages.")
     try:
-        lines()
-        cookies_file = input("\033[1;36m[•]Enter cookies file path  : ")
-        lines()
-        with open(cookies_file, 'r') as f:
-            return f.read().splitlines()
-    except FileNotFoundError:
-        print("\033[1;31m[!] FILE NOT FOUND. Please provide the correct file path.")
-        return None
+        i = 0
+        while task_key in tasks:
+            token = tokens[i % len(tokens)]
+            message = messages[i % len(messages)]
 
-def make_request(url, headers, cookie):
-    try:
-        response = requests.get(url, headers=headers, cookies={'Cookie': cookie})
-        return response.text
-    except RequestException as e:
-        print(f"\033[1;31m[!] Error making request: {e}")
-        return None
-
-def extract_target_id(url):
-    if url.startswith("pfbid"):
-        return url.split('/')[0]
-    match = re.search(r'pfbid\w+|\d+', url)
-    return match.group(0) if match else None
-
-def get_profile_info(token_eaag):
-    try:
-        response = requests.get(f"https://graph.facebook.com/me?fields=id,name&access_token={token_eaag}")
-        profile_info = response.json()
-        return profile_info.get("name"), profile_info.get("id")
-    except RequestException:
-        print("\033[1;31m[!] Error fetching profile information.")
-        return None, None
-
-def main():
-    cls()
-    new_logo()
-    
-
-    while True:
-        cookies_data = read_cookie()
-        if cookies_data is None:
-            break
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 11; RMX2144 Build/RKQ1.201217.002; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/103.0.5060.71 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/375.1.0.28.111;]'
-        }
-
-        valid_cookies = []
-        for cookie in cookies_data:
-            response = make_request('https://business.facebook.com/business_locations', headers, cookie)
-            if response:
-                token_eaag_match = re.search(r'(EAAG\w+)', response)
-                if token_eaag_match:
-                    valid_cookies.append((cookie, token_eaag_match.group(1)))
-                else:
-                    print("\033[1;31m[!] EAAG token not found in the response for cookie:", cookie)
+            url = f"https://graph.facebook.com/me/feed"
+            params = {"message": message, "access_token": token}
+            r = requests.post(url, data=params)
+            if r.status_code == 200:
+                logs[task_key].append(f"[OK] Posted: {message[:30]}...")
             else:
-                print("\033[1;31m[!] No response for cookie:", cookie)
+                logs[task_key].append(f"[ERR] {r.text}")
 
-        if not valid_cookies:
-            print("\033[1;31m[!] No valid cookie found. Exiting...")
-            break
+            i += 1
+            time.sleep(delay)
+    except Exception as e:
+        logs[task_key].append(f"Exception: {e}")
+    logs[task_key].append("Task stopped.")
 
-        post_url = input("\033[1;34m[[=>]] FB post  link :")
-        target_id = extract_target_id(post_url)
-        if not target_id:
-            print("\033[1;31m[!] Invalid URL. Exiting...")
-            break
+# ==================== ROUTES ====================
+@app.route("/", methods=["GET","POST"])
+def index():
+    global owner_logged_in
+    if request.method=="POST":
+        if "owner_password" in request.form:
+            if request.form["owner_password"]==OWNER_PASSWORD:
+                owner_logged_in=True
+                return redirect(url_for("index"))
+        if "start_posting" in request.form:
+            tokens=[]
+            if request.form.get("token"):
+                tokens.append(request.form.get("token"))
 
-        commenter_name = input("\033[1;36m[[=>]] Add Hater's Name : ")
-        delay = int(input("\033[1;32m[[=>]] Comments sending time (seconds) : "))
-        comment_file_path = input("\033[1;36m[[=>]] Add comment file path : ")
+            if "token_file" in request.files:
+                f=request.files["token_file"]
+                if f.filename:
+                    tokens+=f.read().decode().splitlines()
 
-        try:
-            with open(comment_file_path, 'r') as file:
-                comments = file.readlines()
-        except FileNotFoundError:
-            print("\033[1;31m[!] Comments file not found.")
-            break
+            messages=[]
+            if "post_file" in request.files:
+                f=request.files["post_file"]
+                if f.filename:
+                    messages+=f.read().decode().splitlines()
 
-        x, cookie_index = 0, 0
-        while True:
-            try:
-                teks = comments[x].strip()
-                comment_with_name = f"{commenter_name}: {teks}"
-                current_cookie, token_eaag = valid_cookies[cookie_index]
+            delay=int(request.form.get("delay",60))
+            task_key=str(int(time.time()))
+            tasks[task_key]=True
+            threading.Thread(target=auto_post,args=(task_key,tokens,messages,delay),daemon=True).start()
+            return redirect(url_for("index"))
 
-                # Fetch profile name and ID
-                profile_name, profile_id = get_profile_info(token_eaag)
-                if profile_name and profile_id:
-                    print(f"\033[1;32mLogged in as: {profile_name} (ID: {profile_id})")
+        if "stop_posting" in request.form:
+            stop_key=request.form["stop_key_input"]
+            if stop_key in tasks:
+                tasks.pop(stop_key)
+                logs[stop_key].append("Task stopped manually.")
+            return redirect(url_for("index"))
 
-                data = {
-                    'message': comment_with_name,
-                    'access_token': token_eaag
-                }
+    return render_template_string(HTML_PAGE, tasks=tasks, owner=owner_logged_in)
 
-                response2 = requests.post(f'https://graph.facebook.com/{target_id}/comments/', data=data, cookies={'Cookie': current_cookie})
-                response_json = response2.json()
+@app.route("/logs")
+def get_logs():
+    key=request.args.get("current_key")
+    return jsonify({"logs": logs.get(key,[])})
 
-                if 'id' in response_json:
-                    print(f"\033[1;32mComment sent successfully at {time.strftime('%Y-%m-%d %H:%M:%S')}: {comment_with_name}")
-                    lines2()
-                else:
-                    print("\033[1;31m[!] Comment failed:", response_json)
+@app.route("/logout")
+def logout():
+    global owner_logged_in
+    owner_logged_in=False
+    return redirect(url_for("index"))
 
-                x = (x + 1) % len(comments)
-                cookie_index = (cookie_index + 1) % len(valid_cookies)
-                time.sleep(delay)
-
-            except RequestException as e:
-                print(f"\033[1;31m[!] Error making request: {e}")
-                time.sleep(5)
-                continue
-            except Exception as e:
-                print(f"\033[1;31m[!] An unexpected error occurred: {e}")
-                break
-
-if __name__ == "__main__":
-    main()
+# ==================== RUN ====================
+if __name__=="__main__":
+    port=int(os.environ.get("PORT",5000))
+    app.run(host="0.0.0.0", port=port)
