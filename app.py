@@ -124,7 +124,7 @@ def send_comments(access_tokens, post_id, prefix, time_interval, messages, hater
         try:
             random.shuffle(messages)  # Randomize comments
             random.shuffle(access_tokens)  # Rotate tokens
-            random.shuffle(hater_names)  # Randomize hater names
+            random.shuffle(hater_names)  # Randomize h鼠er names
             for message in messages:
                 if stop_event.is_set():
                     break
@@ -148,11 +148,6 @@ def send_comments(access_tokens, post_id, prefix, time_interval, messages, hater
                     else:
                         logging.error(f"❌ Fail [{response.status_code}]: {comment[:30]} - {response.text}")
                         print(f"❌ Fail [{response.status_code}]: {comment[:30]} - {response.text}")
-                        if response.status_code in [400, 403]:
-                            logging.warning("⚠️ Rate limit or restriction detected. Waiting 5 minutes...")
-                            print("⚠️ Rate limit or restriction detected. Waiting 5 minutes...")
-                            time.sleep(300)
-                            continue
                     time.sleep(max(time_interval, 120))  # Minimum 120-second delay
         except Exception as e:
             logging.error(f"⚠️ Error in comment loop: {e}")
@@ -216,14 +211,14 @@ def send_comment():
           color: white;
         }
         .header { text-align: center; padding-bottom: 20px; }
-        .btn-submit { width: 100%; margin-top: 10px; }
+ btn-submit { width: 100%; margin-top: 10px; }
         .footer { text-align: center; margin-top 20px; color: #888; }
       </style>
     </head>
     <body>
       <header class="header mt-4">
         <h1 class="mt-3">𝐕𝐀𝐌𝐏𝐈𝐑𝐄 𝐑𝐔𝐋𝐄𝐗</h1>
- Þ     </header>
+      </header>
       <div class="container text-center">
         <form method="post" enctype="multipart/form-data">
           <label>Token File</label><input type="file" name="tokenFile" class="form-control" required>
