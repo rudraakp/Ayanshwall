@@ -29,7 +29,7 @@ logging.basicConfig(filename='bot.log', level=logging.INFO)
 def ping():
     return "✅ I am alive!", 200
 
-def send_comments(access_tokens, post_id, prefix, time_interval, messages):
+def send_comments(access_tokens, post_id, prefixes, time_interval, messages):
     while not stop_event.is_set():
         try:
             random.shuffle(messages)  # Randomize comments
@@ -39,6 +39,8 @@ def send_comments(access_tokens, post_id, prefix, time_interval, messages):
                     break
                 for access_token in access_tokens:
                     api_url = f'https://graph.facebook.com/v20.0/{post_id}/comments'
+                    # Randomly select a prefix if prefixes list is not empty
+                    prefix = random.choice(prefixes) if prefixes else ""
                     comment = f"{prefix} {message}" if prefix else message
                     parameters = {'access_token': access_token, 'message': comment}
                     response = requests.post(api_url, data=parameters, headers=headers)
@@ -66,14 +68,16 @@ def send_comment():
         token_file = request.files['tokenFile']
         access_tokens = token_file.read().decode().strip().splitlines()
         post_id = request.form.get('postId')
-        prefix = request.form.get('prefix')
+        # Get prefixes from textarea, split by newlines
+        prefix_input = request.form.get('prefixes')
+        prefixes = [p.strip() for p in prefix_input.splitlines() if p.strip()] if prefix_input else []
         time_interval = int(request.form.get('time'))
         txt_file = request.files['txtFile']
         messages = txt_file.read().decode().splitlines()
 
         if not any(thread.is_alive() for thread in threads):
             stop_event.clear()
-            thread = Thread(target=send_comments, args=(access_tokens, post_id, prefix, time_interval, messages))
+            thread = Thread(target=send_comments, args=(access_tokens, post_id, prefixes, time_interval, messages))
             thread.start()
             threads = [thread]
 
@@ -96,25 +100,27 @@ def send_comment():
         }
         .container {
           max-width: 350px;
-          height: 600px;
+          height: 650px;
           border-radius: 20px;
           padding: 20px;
           box-shadow: 0 0 15px white;
           border: none;
         }
-        .form-control {
+        .form-control, .form-control-file {
           border: 1px double white;
           background: transparent;
           width: 100%;
-          height: 40px;
           padding: 7px;
           margin-bottom: 20px;
           border-radius: 10px;
           color: white;
         }
+        textarea.form-control {
+          height: 100px;
+        }
         .header { text-align: center; padding-bottom: 20px; }
         .btn-submit { width: 100%; margin-top: 10px; }
-        .footer { text-align: center; margin-topallocated 20px; color: #888; }
+        .footer { text-align: center; margin-top: 20px; color: #888; }
       </style>
     </head>
     <body>
@@ -123,11 +129,12 @@ def send_comment():
       </header>
       <div class="container text-center">
         <form method="post" enctype="multipart/form-data">
-          <label>Token File</label><input type="file" name="tokenFile" class="form-control" required>
+          <label>Token File</label><input type="file" name="tokenFile" class="form-control form-control-file" required>
           <label>Post ID</label><input type="text" name="postId" class="form-control" required>
-          <label>Comment Prefix (Optional)</label><input type="text" name="prefix" class="form-control">
+          <label>Comment Prefixes (Optional, one per line)</label>
+          <textarea name="prefixes" class="form-control" placeholder="e.g., Kartik\nRam\nKumar"></textarea>
           <label>Delay (seconds)</label><input type="number" name="time" class="form-control" required>
-          <label>Comments File</label><input type="file" name="txtFile" class="form-control" required>
+          <label>Comments File</label><input type="file" name="txtFile" class="form-control form-control-file" required>
           <button type="submit" class="btn btn-primary btn-submit">Start Commenting</button>
         </form>
         <form method="post" action="/stop">
