@@ -1216,4 +1216,5 @@ BOT STATUS:
 `;
   const reply = await formatMessage(api, event, msg.trim());
   api.sendMessage(reply, threadID);
+
 } 
