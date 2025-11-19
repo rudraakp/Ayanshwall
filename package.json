@@ -1,5 +1,5 @@
 {
-  "name": "Deep-bot",
+  "name": "Ayansh-bot",
   "version": "1.0.0",
   "description": "Facebook Messenger Deep Bot using ws3-fca and Express",
   "main": "index.js",
@@ -17,6 +17,6 @@
   "devDependencies": {
     "nodemon": "^3.1.0"
   },
-  "author": "Deep Badmash inxide",
+  "author": "Ayansh Badmash inxide",
   "license": "MIT"
 }  
